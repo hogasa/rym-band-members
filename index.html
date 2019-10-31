@@ -1,7 +1,214 @@
 <!DOCTYPE HTML>
 <html>
 <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Timeline | Group example</title>
+
+
+  <!-- note: moment.js must be loaded before vis-timeline-graph2d or the embedded version of moment.js is used -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.24.0/moment.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"></script>
+  <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"></script>
+
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.css" rel="stylesheet" type="text/css" />
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.6.3/css/all.css" integrity="sha384-UHRtZLI+pbxtHCWp1t77Bi1L4ZtiqrqD80Kn4Z8NTSRyMA2Fd33n5dQ8lWUE00s/" crossorigin="anonymous">
+
+  <script>
+    function setTimeline() {
+        var members = Array();
+        const pattern_band_members = /,(?![^\(]*\))/g;
+        const pattern_member = / *(.+?)( \((.+?)\)|^)/;
+        const pattern_dates = /[0-9]{4}(\-([0-9]+|present))?/;
+
+        var rym_band_members = $('#members').val();
+        var formed = $('#formed').val();
+        var disbanded = $('#disbanded').val();
+        var visualization = $('#visualization')[0];
+
+        band_members = rym_band_members.split(pattern_band_members);
+
+
+        $.each(band_members, function(index, value) {
+          var member_data = value.match(pattern_member);
+          var name = member_data[1];
+          var instruments = [];
+          var periods = [];
+          var extra_data = member_data[3].split(', ');
+
+          $.each(extra_data, function(index, value) {
+            if (value.match(pattern_dates)) {
+              periods.push(new MemberPeriod(value));
+            } else {
+              instruments.push(value);
+            }
+          });
+
+          if (periods.length == 0) {
+            var year_from = formed ? formed : '1900';
+            var year_to = disbanded ? disbanded :  'present';
+            periods.push(new MemberPeriod(year_from + '-' + year_to));
+          }
+
+          var member = new Member(name, instruments, periods);
+          members.push(member);
+        });
+
+        visualization.innerHTML = '';
+        var band = new Band('Metallica', formed, disbanded, members);
+        band.orderBandMembers();
+        var timeline = new BandTimeline(band, visualization);
+        timeline.makeTimeline();
+        $('html, body').animate({scrollTop: visualization.offsetTop}, 500);
+    }
+
+    class BandTimeline {
+      constructor(band=null, container=null) {
+        this.band = band;
+        this.container = container;
+
+        this.options = {};
+        this.groups = new vis.DataSet();
+        this.items = new vis.DataSet();
+        this.timeline= new vis.Timeline(this.container);
+      }
+
+      joinBySize(list, size) {
+        var response = list.reduce(function (a, b) {if (a[a.length-1].length < size) {a[a.length-1].push(b)} else {a.push([b])}; return a;}, [[]]);
+        response = response.reduce(function (a, b) {a.push(b.join(', ')); return a}, []);
+        response = response.join(',</BR>');
+        return response;
+      };
+
+      makeTimeline() {
+        this.groups = new vis.DataSet();
+        this.items = new vis.DataSet();
+        var btl = this;
+        $.each(btl.band.members, function(member_idx, member) {
+          btl.groups.add({
+            id: 'member_' + member_idx,
+            content: '<div class="member_name" data-toggle="tooltip" title="' + member.aka + '">' + member.name + '</div><div class="member_instruments">' + btl.joinBySize(member.instruments, 3) + '</div>'
+          });
+          var final_member = member.isFinalMember(btl.band.disbanded);
+
+          $.each(member.periods, function (period_idx, period) {
+            btl.items.add({
+              id: 'period_' + member_idx + '_' + period_idx,
+              group: 'member_' + member_idx,
+              content: period.period,
+              start: period.period_from,
+              end: period.period_to,
+              title: period.period,
+              className: final_member ? 'final_member' : '',
+            });
+          });
+        });
+
+        this.items.add({
+          id: 'band_period',
+          content: '',
+          start: this.band.formed ? this.band.formed + '-01-01' : new Date(),
+          end: this.band.disbanded ? this.band.disbanded + '-01-01' : new Date(),
+          type: 'background'
+        });
+
+        this.timeline.setOptions(this.options);
+        this.timeline.setGroups(this.groups);
+        this.timeline.setItems(this.items);
+      };
+    }
+
+    class Band {
+      constructor(name='', formed='', disbanded='', members=[]) {
+        this.name = name;
+        this.formed = formed;
+        this.disbanded = disbanded;
+        this.members = members;
+      };
+
+      orderBandMembers() {
+        var disbanded = this.disbanded;
+        this.members = this.members.sort(function(a, b) {
+          if (a.isFinalMember(disbanded) != b.isFinalMember(disbanded)) {
+            return (b.isFinalMember(disbanded) - a.isFinalMember(disbanded));
+          } else if (b.yearsActive() != a.yearsActive()) {
+            return (b.yearsActive() - a.yearsActive());
+          } else {
+            return (b.lastYearActive() - a.lastYearActive());
+          }
+        });
+      };
+    }
+
+    class Member {
+      constructor(name='', instruments=[], periods=[]) {
+        this.name = name;
+        this.aka = '';
+        this.instruments = instruments;
+        this.periods = periods;
+
+        var pattern_name = /(.+?)( \[(aka )?(.+?)\])?$/;
+        var splitted_name = this.name.match(pattern_name);
+        if (splitted_name) {
+          this.name = splitted_name[1];
+          this.aka = splitted_name[4] ? splitted_name[4] : '';
+        }
+      };
+
+      isFinalMember(disbanded=null) {
+        return this.periods.reduce(function (total, value){
+          return total || value.present || disbanded == value.period_to.getFullYear();
+        }, false);
+      };
+
+      yearsActive() {
+        return this.periods.reduce(function (total, value){
+          return total + value.period_to.getFullYear() - value.period_from.getFullYear();
+        }, 0);
+      };
+
+      lastYearActive() {
+        return this.periods.reduce(function (total, value){
+          var response = total < value.period_to.getFullYear() ? value.period_to.getFullYear() : total;
+          return response;
+        }, 0);
+      }
+    }
+
+    class MemberPeriod {
+      constructor(period='') {
+        this.period = String(period);
+        this.present = false;
+        this.makePeriod();
+      };
+
+      makePeriod() {
+        var period = this.period.split('-');
+
+        if (period.length == 1){
+          this.period_from = new Date(period[0], 0, 1);
+          this.period_to = new Date(Number(period[0])+1, 0, 1);
+        } else if (period.length == 2){
+          this.period_from = new Date(period[0], 0, 1);
+          if (period[1].length == 2) {
+            var year_to = period[0].substring(0, 2) + period[1];
+            this.period_to = new Date(year_to, 0, 1);
+          } else if (period[1].length == 4){
+            this.period_to = new Date(period[1], 0, 1);
+          } else if (period[1] == 'present'){
+            this.period_to = new Date();
+            this.present = true;
+          }
+        } else {
+          this.present = true;
+        }
+      }
+    }
+
+  </script>
 
   <style>
     body, html {
@@ -12,87 +219,59 @@
     #visualization {
       box-sizing: border-box;
       width: 100%;
-      height: 300px;
+      height: 100%;
+    }
+
+    .vis-item.final_member {
+      background-color: greenyellow;
+      border-color: green;
     }
 
     .member_name {
       font-weight: bold;
       font-size: larger;
     }
+
+    .member_instruments {
+      font-family: Verdana,Arial,Sans-Serif;
+      font-size: 12px;
+    }
   </style>
 
-  <!-- note: moment.js must be loaded before vis-timeline-graph2d or the embedded version of moment.js is used -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.24.0/moment.min.js"></script>
-  <script src="file:///home/hernan/Workspace/RymBandMembers/js/classes.js"></script>
-
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.js"></script>
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.css" rel="stylesheet" type="text/css" />
-
 </head>
+
 <body>
-<h1>
-  Slayer
-</h1>
-<div id="visualization"></div>
+  <div class="container">
+    <h2>Rate Your Music<br/>Band Members Timeline</h2>
+    <form class="form-horizontal">
+      <div class="form-row">
+        <div class="col-2">
+          <label for="formed" class="mb-2 mr-sm-2">Formed:</label>
+          <input type="text" class="form-control mb-2 mr-sm-2" id="formed" placeholder="Enter year" name="formed">
+        </div>
+        <div class="col-2">
+          <label for="disbanded" class="mb-2 mr-sm-2">Disbanded:</label>
+          <input type="text" class="form-control mb-2 mr-sm-2" id="disbanded" placeholder="Enter year" name="disbanded">
+         </div>
+      </div>
+      <div class="row">
+        <div class="col-12">
+          <div class="form-group">
+            <label for="members">Members:</label>
+            <textarea class="form-control" rows="5" id="members"></textarea>
+          </div>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="col-12">
+          <button type="button" onclick="setTimeline()" class="btn btn-primary"><i class="fas fa-stream"></i> Make Timeline</button>
+        </div>
+      </div>
+    </form>
 
-<script>
-  var now = moment().minutes(0).seconds(0).milliseconds(0);
+    <hr>
 
-  var members = [
-      new Member('Kerry King', 'guitar', [[new Date(1981, 0, 1), new Date()]]),
-      new Member('Tom Araya', 'vocals, bass', [[new Date(1981, 0, 1), new Date()]]),
-      new Member('Paul Bostaph', 'drums', [[new Date(1992, 0, 1), new Date(1996, 0, 1)], [new Date(1997, 0, 1), new Date(2001, 0, 1)], [new Date(2013, 0, 1), new Date()]]),
-      new Member('Gary Holt', 'guitar', [[new Date(2013, 0, 1), new Date()]]),
-      new Member('Jeff Hanneman', 'guitar', [[new Date(1981, 0, 1), new Date(2013, 0, 1)]]),
-      new Member('Dave Lombardo', 'drums', [[new Date(1982, 0, 1), new Date(1986, 0, 1)], [new Date(1987, 0, 1), new Date(1992, 0, 1)], [new Date(2001, 0, 1), new Date(2013, 0, 1)]]),
-      new Member('Tony Scaglione', 'drums', [[new Date(1986, 0, 1), new Date(1987, 0, 1)]]),
-      new Member('Jon Dette', 'drums', [[new Date(1996, 0, 1), new Date(1997, 0, 1)]]),
-  ]
-
-  var groups = new vis.DataSet();
-  var items = new vis.DataSet();
-
-  for (var i = 0; i < members.length; i++) {
-    groups.add({id: i, content: '<div class="member_name">' + members[i].name + '</div><div>' + members[i].instruments + '</div>'});
-
-    for (j = 0; j < members[i].date.length; j++) {
-      items.add({
-        id: (i*10)+j,
-        group: i,
-        content: '',
-        start: members[i].date[j][0],
-        end: members[i].date[j][1]
-      });
-    }
-  }
-
-
-  // for (var g = 0; g < names.length; g++) {
-  //   groups.add({id: g, content: names[g]});
-  //
-  //   var start = now.clone().add(Math.random() * 200, 'hours');
-  //   items.add({
-  //     id: g,
-  //     group: g,
-  //     content: 'item ' + g,
-  //     start: start,
-  //     end: start.clone().add(Math.random() * 200, 'hours'),
-  //   });
-  //
-  // }
-
-
-  // create visualization
-  var container = document.getElementById('visualization');
-  var options = {
-    // groupOrder: 'content'  // groupOrder can be a property name or a sorting function
-  };
-
-  var timeline = new vis.Timeline(container);
-  timeline.setOptions(options);
-  timeline.setGroups(groups);
-  timeline.setItems(items);
-
-</script>
+    <div id="visualization"></div>
+  </div>
 </body>
 </html>
