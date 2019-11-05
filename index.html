@@ -89,9 +89,10 @@
         this.items = new vis.DataSet();
         var btl = this;
         $.each(btl.band.members, function(member_idx, member) {
+          var member_aka = member.aka ? ' <i class="fas fa-info-circle" style="color: #003c7d;" title="' + member.aka+ '"></i>' : '';
           btl.groups.add({
             id: 'member_' + member_idx,
-            content: '<div class="member_name" data-toggle="tooltip" title="' + member.aka + '">' + member.name + '</div><div class="member_instruments">' + btl.joinBySize(member.instruments, 3) + '</div>'
+            content: '<div class="member_name" data-toggle="tooltip">' + member.name + member_aka + ' </div><div class="member_instruments">' + btl.joinBySize(member.instruments, 3) + '</div>'
           });
           var final_member = member.isFinalMember(btl.band.disbanded);
 
