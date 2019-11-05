@@ -116,7 +116,7 @@
         this.band = band;
         this.container = container;
 
-        this.options = {};
+        this.options = {selectable: false};
         this.groups = new vis.DataSet();
         this.items = new vis.DataSet();
         this.timeline= new vis.Timeline(this.container);
@@ -137,7 +137,8 @@
           var member_aka = member.aka ? ' <i class="fas fa-info-circle" style="color: #003c7d;" title="' + member.aka+ '"></i>' : '';
           btl.groups.add({
             id: 'member_' + member_idx,
-            content: '<div class="member_name" data-toggle="tooltip">' + member.name + member_aka + ' </div><div class="member_instruments">' + btl.joinBySize(member.instruments, 3) + '</div>'
+            content: '<div class="member_name">' + member.name + member_aka + ' </div><div class="member_instruments">' + member.instruments.join(', ') + '</div>',
+            style: "max-width: 250px;",
           });
           var final_member = member.isFinalMember(btl.band.disbanded);
 
@@ -261,6 +262,7 @@
     .member_instruments {
       font-family: Verdana,Arial,Sans-Serif;
       font-size: 12px;
+      word-wrap: break-word;
     }
 
     .title-version{
