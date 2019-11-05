@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RYM Band Members Timeline v0.2.0</title>
 
-
   <!-- note: moment.js must be loaded before vis-timeline-graph2d or the embedded version of moment.js is used -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.24.0/moment.min.js"></script>
@@ -20,50 +19,96 @@
 
   <script>
     function setTimeline() {
-        var members = Array();
-        const pattern_band_members = /,(?![^\(]*\))/g;
-        const pattern_member = / *(.+?)( \((.+?)\)|^)/;
-        const pattern_dates = /[0-9]{4}(\-([0-9]+|present))?/;
-
-        var rym_band_members = $('#members').val();
+        var members = $('#members').val();
         var formed = $('#formed').val();
         var disbanded = $('#disbanded').val();
         var visualization = $('#visualization')[0];
 
-        band_members = rym_band_members.split(pattern_band_members);
-
-
-        $.each(band_members, function(index, value) {
-          var member_data = value.match(pattern_member);
-          var name = member_data[1];
-          var instruments = [];
-          var periods = [];
-          var extra_data = member_data[3].split(', ');
-
-          $.each(extra_data, function(index, value) {
-            if (value.match(pattern_dates)) {
-              periods.push(new MemberPeriod(value));
-            } else {
-              instruments.push(value);
-            }
-          });
-
-          if (periods.length == 0) {
-            var year_from = formed ? formed : '1900';
-            var year_to = disbanded ? disbanded :  'present';
-            periods.push(new MemberPeriod(year_from + '-' + year_to));
-          }
-
-          var member = new Member(name, instruments, periods);
-          members.push(member);
-        });
-
         visualization.innerHTML = '';
-        var band = new Band('Metallica', formed, disbanded, members);
+        var band = new BandSerializer(formed, disbanded, members).createBand();
         band.orderBandMembers();
         var timeline = new BandTimeline(band, visualization);
         timeline.makeTimeline();
         $('html, body').animate({scrollTop: visualization.offsetTop}, 500);
+    }
+
+    class BandSerializer {
+      constructor(formed='', disbanded='', members='') {
+        this.formed = formed;
+        this.disbanded = disbanded;
+        this.members = members;
+      };
+
+      createBand() {
+        const pattern_band_members = /,(?![^\(]*\))/g;
+        var band = new Band('', this.formed, this.disbanded);
+
+        var members = this.members.split(pattern_band_members);
+        var bs = this;
+        $.each(members, function(index, value) {
+          band.members.push(bs.createMember(value));
+        });
+
+        return band;
+      };
+
+      createMember(member_string) {
+        const pattern_member = / *(.+?)( \[(aka )?(.+?)\])?( \((.+?)\)|^)/;
+        const pattern_dates = /[0-9]{4}(\-([0-9]+|present))?/;
+        var member = new Member();
+
+        var member_data = member_string.match(pattern_member);
+        if (member_data) {
+          member.name = member_data[1];
+          member.aka = member_data[4] ? member_data[4] : '';
+        }
+
+        var extra_data = member_data[6].split(', ');
+        var bs = this;
+        $.each(extra_data, function(index, value) {
+          if (value.match(pattern_dates)) {
+            member.periods.push(bs.createPeriod(value));
+          } else {
+            member.instruments.push(value);
+          }
+        });
+
+        if (member.periods.length == 0) {
+            member.periods.push(bs.createPeriod(''));
+        }
+
+        return member;
+      };
+
+      createPeriod(period_string) {
+        var period = new MemberPeriod(period_string);
+
+        var period_split = period_string.split('-');
+        if (period_string.length == '') {
+          period.period_from = this.formed ? new Date(this.formed, 0, 1) : new Date(1900, 0, 1);
+          period.period_to  = this.disbanded ? new Date(this.disbanded, 0, 1) : new Date();
+          period.period = period.period_from.getFullYear() + '-' + period.period_to.getFullYear();
+          period.present = true;
+        } else if (period_split.length == 1) {
+          period.period_from = new Date(period_split[0], 0, 1);
+          period.period_to = new Date(Number(period_split[0])+1, 0, 1);
+        } else if (period_split.length == 2){
+          period.period_from = new Date(period_split[0], 0, 1);
+          if (period_split[1].length == 2) {
+            var year_to = period_split[0].substring(0, 2) + period_split[1];
+            period.period_to = new Date(year_to, 0, 1);
+          } else if (period_split[1].length == 4){
+            period.period_to = new Date(period_split[1], 0, 1);
+          } else if (period_split[1] == 'present'){
+            period.period_to = new Date();
+            period.present = true;
+          } else if (period_split[1] == '?'){
+            period.period_to = this.disbanded ? new Date(this.disbanded, 0, 1) : new Date();
+          }
+        }
+
+        return period;
+      };
     }
 
     class BandTimeline {
@@ -146,7 +191,7 @@
     }
 
     class Member {
-      constructor(name='', instruments=[], periods=[]) {
+      constructor(name='', aka='', instruments=[], periods=[]) {
         this.name = name;
         this.aka = '';
         this.instruments = instruments;
@@ -183,31 +228,10 @@
     class MemberPeriod {
       constructor(period='') {
         this.period = String(period);
+        this.period_from = '';
+        this.period_to = '';
         this.present = false;
-        this.makePeriod();
       };
-
-      makePeriod() {
-        var period = this.period.split('-');
-
-        if (period.length == 1){
-          this.period_from = new Date(period[0], 0, 1);
-          this.period_to = new Date(Number(period[0])+1, 0, 1);
-        } else if (period.length == 2){
-          this.period_from = new Date(period[0], 0, 1);
-          if (period[1].length == 2) {
-            var year_to = period[0].substring(0, 2) + period[1];
-            this.period_to = new Date(year_to, 0, 1);
-          } else if (period[1].length == 4){
-            this.period_to = new Date(period[1], 0, 1);
-          } else if (period[1] == 'present'){
-            this.period_to = new Date();
-            this.present = true;
-          }
-        } else {
-          this.present = true;
-        }
-      }
     }
 
   </script>
